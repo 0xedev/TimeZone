@@ -1,1 +1,20 @@
-{}
+{
+  "accountAssociation": {
+    "header": "eyJmaWQiOjIzOTM5NiwidHlwZSI6ImN1c3RvZHkiLCJrZXkiOiIweDRENEU1MjIzODRkNkYxMDkwYkZENEM0NTI3YTdkNTJERmQyMGJDYTMifQ",
+    "payload": "eyJkb21haW4iOiJ0aW1lLXpvbmUtcGluay52ZXJjZWwuYXBwIn0",
+    "signature": "MHg4OGJiYjkzYTU2MDM3ZDc3MmI0OWViNzAxZTgyMWI3OGU5MzU1YzBjNDNhNzY2MDQyNzBkNGZlNjMwNjEyZTM2NDA5NTdlOWNmN2FiOGZkMDhiYTMzYTZlOWE2YzA1ZjBhYmUxMTcwOWIwOGU2NWUwNGQ5NTZkM2ZhOGY2N2ZmNjFj"
+  },
+  "frame": {
+    "version": "1",
+    "name": "Time converter",
+    "iconUrl": "https://time-zone-pink.vercel.app/icon.jpg",
+    "castShareUrl": "https://time-zone-pink.vercel.app/share",
+    "description": "A simple Farcaster frame that allows users to select a time zone and see the current time in that zone.",
+    "homeUrl": "https://time-zone-pink.vercel.app",
+    "imageUrl": "https://time-zone-pink.vercel.app/image.png",
+    "buttonTitle": "Convert Time",
+    "splashImageUrl": "https://time-zone-pink.vercel.app/image.png",
+    "splashBackgroundColor": "#ffffff",
+    "webhookUrl": "https://time-zone-pink.vercel.app/api/webhook"
+  }
+}

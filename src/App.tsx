@@ -1,15 +1,25 @@
-import { useState, useEffect } from "react";
-import { Clock, Globe, MapPin, Copy, Check } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Clock, Globe, MapPin, Copy, Check, Calendar } from "lucide-react";
 import { sdk } from "@farcaster/frame-sdk";
-import DateTimePicker from "react-datetime-picker";
-import "react-datetime-picker/dist/DateTimePicker.css";
+
+interface TimeZone {
+  name: string;
+  zone: string;
+  flag: string;
+  isLocal?: boolean;
+}
+
+interface ConvertedTime extends TimeZone {
+  converted: string;
+  timeOnly: string;
+  dateOnly: string;
+}
 
 export default function App() {
-  const [eventTime, setEventTime] = useState<Date | null>(null);
-  const [eventTimeZone, setEventTimeZone] = useState("UTC");
-  const [convertedTimes, setConvertedTimes] = useState<any[]>([]);
-  const [error, setError] = useState("");
-  const [isConverting, setIsConverting] = useState(false);
+  const [eventDate, setEventDate] = useState<string>("");
+  const [eventTime, setEventTime] = useState<string>("");
+  const [eventTimeZone, setEventTimeZone] = useState<string>("UTC");
+  const [convertedTimes, setConvertedTimes] = useState<ConvertedTime[]>([]);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
 
   // UTC offset options for event timezone
@@ -42,7 +52,7 @@ export default function App() {
   ];
 
   // Popular time zones for display
-  const popularTimeZones = [
+  const popularTimeZones: TimeZone[] = [
     { name: "New York", zone: "America/New_York", flag: "🇺🇸" },
     { name: "Los Angeles", zone: "America/Los_Angeles", flag: "🇺🇸" },
     { name: "London", zone: "Europe/London", flag: "🇬🇧" },
@@ -51,41 +61,27 @@ export default function App() {
     { name: "Dubai", zone: "Asia/Dubai", flag: "🇦🇪" },
   ];
 
-  // Automatically set current time and trigger conversion
-  useEffect(() => {
-    sdk.actions.ready();
-    const now = new Date();
-    setEventTime(now);
-    handleConvert(now);
-  }, []);
+  const formatDateTime = (date: Date): { dateStr: string; timeStr: string } => {
+    const d = new Date(date);
+    const dateStr = d.toISOString().split("T")[0];
+    const timeStr = d.toTimeString().slice(0, 5);
+    return { dateStr, timeStr };
+  };
 
-  const handleConvert = async (date: Date | null = eventTime) => {
-    if (!date) {
-      setError("Please select an event time");
-      return;
-    }
-
-    setIsConverting(true);
-    setError("");
+  const convertTimes = useCallback(() => {
+    if (!eventDate || !eventTime) return;
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
-      if (isNaN(date.getTime())) {
-        setError("Invalid date selected. Please choose a valid date.");
-        setIsConverting(false);
-        return;
-      }
-
-      // Adjust event time to selected UTC offset
+      // Create event datetime in UTC
+      const eventDateTime = new Date(`${eventDate}T${eventTime}:00`);
       const offsetHours = parseInt(eventTimeZone.replace("UTC", "") || "0");
       const adjustedDate = new Date(
-        date.getTime() - offsetHours * 60 * 60 * 1000
+        eventDateTime.getTime() - offsetHours * 60 * 60 * 1000
       );
 
       const userTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-      const allTimeZones = [
+      const allTimeZones: TimeZone[] = [
         {
           name: "Your Local Time",
           zone: userTimeZone,
@@ -95,8 +91,8 @@ export default function App() {
         ...popularTimeZones,
       ];
 
-      const conversions = allTimeZones.map((tz) => {
-        const options: Intl.DateTimeFormatOptions = {
+      const conversions: ConvertedTime[] = allTimeZones.map((tz) => {
+        const converted = new Intl.DateTimeFormat("en-US", {
           timeZone: tz.zone,
           year: "numeric",
           month: "short",
@@ -104,239 +100,244 @@ export default function App() {
           hour: "numeric",
           minute: "2-digit",
           hour12: true,
-        };
+        }).format(adjustedDate);
 
-        const dateOptions: Intl.DateTimeFormatOptions = {
-          timeZone: tz.zone,
-          weekday: "long",
-          year: "numeric",
-          month: "long",
-          day: "numeric",
-        };
-
-        const timeOnly: Intl.DateTimeFormatOptions = {
+        const timeOnly = new Intl.DateTimeFormat("en-US", {
           timeZone: tz.zone,
           hour: "numeric",
           minute: "2-digit",
           hour12: true,
-        };
+        }).format(adjustedDate);
 
-        const formatter = new Intl.DateTimeFormat("en-US", {
+        const dateOnly = new Intl.DateTimeFormat("en-US", {
           timeZone: tz.zone,
-          hour: "numeric",
-          minute: "numeric",
-        });
-        const parts = formatter.formatToParts(adjustedDate);
-        const offsetPart =
-          parts.find((part) => part.type === "timeZoneName")?.value || "";
-        const offset = offsetPart.includes("GMT")
-          ? offsetPart
-          : `GMT${adjustedDate.toLocaleString("en-US", { timeZone: tz.zone, timeZoneName: "short" }).split(" ")[2]}`;
+          month: "short",
+          day: "numeric",
+        }).format(adjustedDate);
 
         return {
           ...tz,
-          converted: adjustedDate.toLocaleString("en-US", options),
-          fullDate: adjustedDate.toLocaleString("en-US", dateOptions),
-          timeOnly: adjustedDate.toLocaleString("en-US", timeOnly),
-          offset,
+          converted,
+          timeOnly,
+          dateOnly,
         };
       });
 
       setConvertedTimes(conversions);
     } catch (err) {
-      setError("Error converting time. Please try again.");
-    } finally {
-      setIsConverting(false);
+      console.error("Conversion error:", err);
     }
-  };
+  }, [eventDate, eventTime, eventTimeZone]);
 
-  const copyToClipboard = async (text: string, index: number) => {
+  // Initialize with current time
+  useEffect(() => {
+    sdk.actions.ready();
+    const now = new Date();
+    const { dateStr, timeStr } = formatDateTime(now);
+    setEventDate(dateStr);
+    setEventTime(timeStr);
+  }, []);
+
+  // Auto-convert when inputs change
+  useEffect(() => {
+    convertTimes();
+  }, [convertTimes]);
+
+  const copyToClipboard = async (
+    text: string,
+    index: number
+  ): Promise<void> => {
     try {
       await navigator.clipboard.writeText(text);
       setCopiedIndex(index);
-      setTimeout(() => setCopiedIndex(null), 2000);
+      setTimeout(() => setCopiedIndex(null), 1500);
     } catch (err) {
       console.log("Copy failed");
     }
   };
 
-  const handleQuickFill = (hours = 0) => {
+  const handleQuickFill = (hours: number = 0): void => {
     const now = new Date();
     now.setHours(now.getHours() + hours);
-    setEventTime(now);
-    handleConvert(now);
+    const { dateStr, timeStr } = formatDateTime(now);
+    setEventDate(dateStr);
+    setEventTime(timeStr);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-100/40 backdrop-blur-3xl text-slate-900">
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-200/20 rounded-full blur-3xl animate-pulse"></div>
-        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 bg-indigo-200/20 rounded-full blur-3xl animate-pulse delay-1000"></div>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-indigo-950 text-white">
+      {/* Background effects */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-1/4 left-1/6 w-64 h-64 bg-blue-400/10 rounded-full blur-3xl animate-pulse"></div>
+        <div className="absolute bottom-1/3 right-1/5 w-48 h-48 bg-purple-400/8 rounded-full blur-3xl animate-pulse delay-1000"></div>
       </div>
 
-      <div className="relative z-10 flex items-center justify-center min-h-screen p-4">
-        <div className="max-w-2xl w-full">
-          <div className="backdrop-blur-xl bg-white/80 border border-white/20 rounded-3xl shadow-2xl shadow-slate-200/50 overflow-hidden">
-            <div className="bg-gradient-to-r from-blue-600/10 via-indigo-600/10 to-purple-600/10 p-8 border-b border-white/10">
-              <div className="flex items-center justify-center gap-3 mb-2">
-                <div className="p-3 bg-blue-500/10 rounded-2xl">
-                  <Clock className="w-8 h-8 text-blue-600" />
-                </div>
-                <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent">
-                  Time Converter
-                </h1>
+      <div className="relative z-10 p-4 pb-8">
+        <div className="max-w-md mx-auto">
+          {/* Header */}
+          <div className="text-center mb-6 pt-4">
+            <div className="inline-flex items-center gap-2 mb-2">
+              <div className="p-2 bg-white/10 backdrop-blur-xl rounded-xl border border-white/15">
+                <Clock className="w-6 h-6 text-blue-300" />
               </div>
-              <p className="text-slate-600 text-center text-sm">
-                Convert event time to multiple timezones instantly
-              </p>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-white to-blue-200 bg-clip-text text-transparent">
+                Time Converter
+              </h1>
             </div>
+            <p className="text-white/60 text-sm">
+              Convert to multiple timezones
+            </p>
+          </div>
 
-            <div className="p-8 space-y-6">
-              <div className="space-y-3">
-                <label className="block text-sm font-medium text-slate-700">
+          {/* Input Section */}
+          <div className="backdrop-blur-xl bg-white/8 border border-white/12 rounded-2xl p-4 mb-4 shadow-xl">
+            <div className="space-y-4">
+              {/* Date Input */}
+              <div>
+                <label className="block text-sm font-medium text-white/80 mb-2">
+                  Event Date
+                </label>
+                <div className="relative">
+                  <input
+                    type="date"
+                    value={eventDate}
+                    onChange={(e) => setEventDate(e.target.value)}
+                    className="w-full p-3 bg-white/5 backdrop-blur-xl border border-white/12 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400/30 focus:border-white/20 transition-all text-white text-base"
+                  />
+                  <Calendar className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-white/40 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Time Input */}
+              <div>
+                <label className="block text-sm font-medium text-white/80 mb-2">
                   Event Time
                 </label>
-                <DateTimePicker
-                  onChange={(date: Date | null) => {
-                    setEventTime(date);
-                    handleConvert(date);
-                  }}
+                <input
+                  type="time"
                   value={eventTime}
-                  format="y-MM-dd h:mm a"
-                  className="custom-calendar w-full p-4 bg-white/60 border border-slate-200/50 rounded-2xl"
+                  onChange={(e) => setEventTime(e.target.value)}
+                  className="w-full p-3 bg-white/5 backdrop-blur-xl border border-white/12 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400/30 focus:border-white/20 transition-all text-white text-base"
                 />
-                <label className="block text-sm font-medium text-slate-700">
-                  Event Timezone
-                </label>
-                <select
-                  value={eventTimeZone}
-                  onChange={(e) => {
-                    setEventTimeZone(e.target.value);
-                    handleConvert();
-                  }}
-                  className="w-full p-4 bg-white/60 border border-slate-200/50 rounded-2xl focus:outline-none focus:ring-4 focus:ring-blue-500/20 focus:border-blue-500/50 transition-all text-slate-900 backdrop-blur-sm"
-                >
-                  {utcOffsets.map((offset) => (
-                    <option key={offset} value={offset}>
-                      {offset}
-                    </option>
-                  ))}
-                </select>
               </div>
 
-              <div className="flex gap-2 flex-wrap">
+              {/* Timezone Select */}
+              <div>
+                <label className="block text-sm font-medium text-white/80 mb-2">
+                  Event Timezone
+                </label>
+                <div className="relative">
+                  <select
+                    value={eventTimeZone}
+                    onChange={(e) => setEventTimeZone(e.target.value)}
+                    className="w-full p-3 bg-white/5 backdrop-blur-xl border border-white/12 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400/30 focus:border-white/20 transition-all text-white appearance-none text-base"
+                  >
+                    {utcOffsets.map((offset) => (
+                      <option
+                        key={offset}
+                        value={offset}
+                        className="bg-slate-800 text-white"
+                      >
+                        {offset}
+                      </option>
+                    ))}
+                  </select>
+                  <Globe className="absolute right-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-white/40 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Quick Fill Buttons */}
+              <div className="flex gap-2">
                 <button
                   onClick={() => handleQuickFill(0)}
-                  className="px-4 py-2 bg-slate-100/50 hover:bg-slate-200/50 rounded-xl text-sm font-medium text-slate-700 transition-all backdrop-blur-sm"
+                  className="flex-1 px-3 py-2 bg-white/5 hover:bg-white/8 backdrop-blur-xl border border-white/10 hover:border-white/15 rounded-lg text-sm font-medium text-white/80 hover:text-white transition-all"
                 >
                   Now
                 </button>
                 <button
                   onClick={() => handleQuickFill(1)}
-                  className="px-4 py-2 bg-slate-100/50 hover:bg-slate-200/50 rounded-xl text-sm font-medium text-slate-700 transition-all backdrop-blur-sm"
+                  className="flex-1 px-3 py-2 bg-white/5 hover:bg-white/8 backdrop-blur-xl border border-white/10 hover:border-white/15 rounded-lg text-sm font-medium text-white/80 hover:text-white transition-all"
                 >
                   +1 Hour
                 </button>
                 <button
                   onClick={() => handleQuickFill(24)}
-                  className="px-4 py-2 bg-slate-100/50 hover:bg-slate-200/50 rounded-xl text-sm font-medium text-slate-700 transition-all backdrop-blur-sm"
+                  className="flex-1 px-3 py-2 bg-white/5 hover:bg-white/8 backdrop-blur-xl border border-white/10 hover:border-white/15 rounded-lg text-sm font-medium text-white/80 hover:text-white transition-all"
                 >
                   Tomorrow
                 </button>
               </div>
-
-              <button
-                onClick={() => handleConvert()}
-                disabled={isConverting}
-                className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:from-slate-400 disabled:to-slate-500 text-white py-4 rounded-2xl font-semibold shadow-lg shadow-blue-500/25 transition-all transform hover:scale-[1.02] active:scale-[0.98] disabled:hover:scale-100"
-              >
-                {isConverting ? (
-                  <div className="flex items-center justify-center gap-2">
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                    Converting...
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-center gap-2">
-                    <Globe className="w-5 h-5" />
-                    Convert Time
-                  </div>
-                )}
-              </button>
-
-              {error && (
-                <div className="p-4 bg-red-50/80 border border-red-200/50 text-red-700 rounded-2xl backdrop-blur-sm">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                    {error}
-                  </div>
-                </div>
-              )}
             </div>
-
-            {convertedTimes.length > 0 && (
-              <div className="border-t border-white/10 bg-gradient-to-b from-transparent to-slate-50/30">
-                <div className="p-6">
-                  <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                    <MapPin className="w-5 h-5 text-blue-600" />
-                    Converted Times
-                  </h3>
-                  <div className="space-y-3">
-                    {convertedTimes.map((time, index) => (
-                      <div
-                        key={index}
-                        className={`p-4 rounded-2xl border transition-all hover:shadow-md ${
-                          time.isLocal
-                            ? "bg-blue-50/80 border-blue-200/50 shadow-sm"
-                            : "bg-white/40 border-white/20 hover:bg-white/60"
-                        } backdrop-blur-sm group`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <span className="text-2xl">{time.flag}</span>
-                            <div>
-                              <div className="font-semibold text-slate-800 flex items-center gap-2">
-                                {time.name}
-                                {time.isLocal && (
-                                  <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-medium">
-                                    LOCAL
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-sm text-slate-600">
-                                {time.zone} ({time.offset})
-                              </div>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-lg font-bold text-slate-900">
-                              {time.timeOnly}
-                            </div>
-                            <div className="text-sm text-slate-600">
-                              {time.converted.split(",")[0]}
-                            </div>
-                          </div>
-                          <button
-                            onClick={() =>
-                              copyToClipboard(time.converted, index)
-                            }
-                            className="ml-3 p-2 hover:bg-white/50 rounded-xl transition-all opacity-0 group-hover:opacity-100"
-                          >
-                            {copiedIndex === index ? (
-                              <Check className="w-4 h-4 text-green-600" />
-                            ) : (
-                              <Copy className="w-4 h-4 text-slate-400" />
-                            )}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
-          <div className="text-center mt-6 text-sm text-slate-500">
+          {/* Results Section */}
+          {convertedTimes.length > 0 && (
+            <div className="backdrop-blur-xl bg-white/8 border border-white/12 rounded-2xl shadow-xl overflow-hidden">
+              <div className="p-4 border-b border-white/8 bg-white/5">
+                <h3 className="text-lg font-semibold text-white/90 flex items-center gap-2">
+                  <MapPin className="w-5 h-5 text-blue-300" />
+                  Converted Times
+                </h3>
+              </div>
+
+              <div className="divide-y divide-white/8">
+                {convertedTimes.map((time, index) => (
+                  <div
+                    key={index}
+                    className={`p-4 transition-all group ${
+                      time.isLocal
+                        ? "bg-blue-500/10 border-l-4 border-l-blue-400"
+                        : "hover:bg-white/5"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <span className="text-xl">{time.flag}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-white/90 flex items-center gap-2 text-sm">
+                            {time.name}
+                            {time.isLocal && (
+                              <span className="px-2 py-0.5 bg-blue-400/20 text-blue-300 rounded text-xs font-medium border border-blue-400/30">
+                                LOCAL
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-white/50 truncate">
+                            {time.zone}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-right flex items-center gap-2">
+                        <div>
+                          <div className="text-lg font-bold text-white/95">
+                            {time.timeOnly}
+                          </div>
+                          <div className="text-xs text-white/60">
+                            {time.dateOnly}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => copyToClipboard(time.converted, index)}
+                          className="p-2 hover:bg-white/8 backdrop-blur-xl rounded-lg transition-all opacity-0 group-hover:opacity-100 border border-transparent hover:border-white/10"
+                        >
+                          {copiedIndex === index ? (
+                            <Check className="w-4 h-4 text-green-400" />
+                          ) : (
+                            <Copy className="w-4 h-4 text-white/40" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Footer */}
+          <div className="text-center mt-6 text-xs text-white/40">
             Real-time timezone conversion
           </div>
         </div>
